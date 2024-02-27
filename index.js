@@ -1,6 +1,8 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken')
+const PDFDocument = require('pdfkit');
+
 
 const mysql = require('mysql2');
 const cors = require("cors")
@@ -9,10 +11,13 @@ const port = 3000;
 
 // MySQL Connection
 const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'Malinge?1',
-    database: 'voting_system'
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_DATABASE,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
 });
 
 db.connect((err) => {
@@ -83,12 +88,10 @@ app.post('/login', (req, res) => {
     });
 });
 // Middleware for login authentication
-// Middleware for login authentication
 function authenticate(req, res, next) {
     // Extract the JWT token from the Authorization header
     const authToken = req.headers.authorization;
-    console.log(authToken)
-
+    console.log(authToken); // Log the received token
 
     // Check if the token exists
     if (!authToken) {
@@ -98,7 +101,7 @@ function authenticate(req, res, next) {
 
     try {
         // Verify the JWT token
-        const decoded = jwt.verify(authToken, 'secret_key');
+        const decoded = jwt.verify(authToken.split(' ')[1], 'secret_key'); // Extract the token part after "Bearer"
         console.log('Token decoded successfully:', decoded);
 
         // Attach the decoded token data to the request object
@@ -112,7 +115,6 @@ function authenticate(req, res, next) {
         return res.status(401).send('Unauthorized');
     }
 }
-
 
 // Voting endpoint
 app.post('/vote', authenticate, (req, res) => {
@@ -170,6 +172,96 @@ app.get('/results', (req, res) => {
             return;
         }
         res.status(200).json(result);
+    });
+});
+// Route to fetch list of posts
+app.get('/posts', (req, res) => {
+    const sql = 'SELECT DISTINCT post FROM candidates';
+    db.query(sql, (err, result) => {
+      if (err) {
+        console.error('Error fetching posts:', err);
+        res.status(500).send('Error fetching posts');
+        return;
+      }
+      const posts = result.map((row) => row.post);
+      res.status(200).json(posts);
+    });
+  });
+  
+  // Route to fetch candidates' reports sorted by post
+  app.get('/candidates-reports/:post', (req, res) => {
+    const { post } = req.params;
+    const sql = `
+      SELECT candidates.*, COUNT(votes.id) AS votes_count
+      FROM candidates
+      LEFT JOIN votes ON candidates.id = votes.candidate_id
+      WHERE candidates.post = ?
+      GROUP BY candidates.id
+      ORDER BY votes_count DESC
+    `;
+    db.query(sql, [post], (err, result) => {
+      if (err) {
+        console.error('Error fetching candidates:', err);
+        res.status(500).send('Error fetching candidates');
+        return;
+      }
+      res.status(200).json(result);
+    });
+  });
+
+
+app.get('/generate-candidate-report', (req, res) => {
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="candidate_report.pdf"');
+    doc.pipe(res);
+
+    const sql = 'SELECT * FROM candidates';
+    db.query(sql, (err, results) => {
+        if (err) {
+            console.error('Error fetching candidates:', err);
+            res.status(500).send('Error fetching candidates');
+            return;
+        }
+        
+        doc.fontSize(24).text('Candidate Details Report', { align: 'center' });
+        doc.moveDown();
+        results.forEach((candidate, index) => {
+            doc.fontSize(16).text(`Candidate ${index + 1}: ${candidate.name}`, { align: 'left' });
+            doc.fontSize(12).text(`Post: ${candidate.post}`, { align: 'left' });
+            doc.fontSize(12).text(`State: ${candidate.state}`, { align: 'left' });
+            doc.moveDown();
+        });
+
+        doc.end();
+    });
+});
+
+// Route to generate voting results report
+app.get('/generate-voting-results-report', (req, res) => {
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="voting_results_report.pdf"');
+    doc.pipe(res);
+
+    const sql = 'SELECT candidates.post, candidates.name, COUNT(*) AS votes_count FROM candidates JOIN votes ON candidates.id = votes.candidate_id GROUP BY candidates.post, candidates.name';
+    db.query(sql, (err, results) => {
+        if (err) {
+            console.error('Error fetching voting results:', err);
+            res.status(500).send('Error fetching voting results');
+            return;
+        }
+
+        doc.fontSize(24).text('Voting Results Report', { align: 'center' });
+        doc.moveDown();
+        results.forEach((result, index) => {
+            doc.fontSize(16).text(`Post: ${result.post}`, { align: 'left' });
+            doc.fontSize(12).text(`Candidate: ${result.name}`, { align: 'left' });
+            doc.fontSize(12).text(`Votes Count: ${result.votes_count}`, { align: 'left' });
+            doc.moveDown();
+        });
+
+        doc.end();
     });
 });
 
