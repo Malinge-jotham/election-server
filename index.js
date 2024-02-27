@@ -7,7 +7,7 @@ const PDFDocument = require('pdfkit');
 const mysql = require('mysql2');
 const cors = require("cors")
 const app = express();
-const port = 3000;
+  const port = process.env.PORT || 3001;
 
 // MySQL Connection
 const db = mysql.createConnection({
