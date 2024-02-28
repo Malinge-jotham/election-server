@@ -95,7 +95,7 @@ function authenticate(req, res, next) {
 
     // Check if the token exists
     if (!authToken) {
-        console.log('No token found in request headers');
+        console.log('No token found ');
         return res.status(401).send('Unauthorized');
     }
 
